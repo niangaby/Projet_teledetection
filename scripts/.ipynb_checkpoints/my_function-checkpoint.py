@@ -72,3 +72,51 @@ def rasterize_layer(raster, layer):
     band.FlushCache()
     raster = None
     print("✅ Rasterisation terminée.")
+
+# sample curation
+
+import geopandas as gpd
+
+def clip_to_extent(gdf, extent_gdf):
+    """
+    Découpe un GeoDataFrame avec une emprise spécifiée.
+    """
+    return gdf.clip(extent_gdf)
+
+def filter_classes(gdf):
+    """
+    Filtre les classes en fonction de la Figure 2.
+    """
+    # Classes valides
+    valid_classes = {
+        'Autres feuillus': 11,
+        'Chêne': 12,
+        'Robinier': 13,
+        'Peupleraie': 14,
+        'Autres conifères autre que pin': 21,
+        'Autres Pin': 22,
+        'Douglas': 23,
+        'Pin laricio ou pin noir': 24,
+        'Pin maritime': 25,
+        'Feuillus en îlots': 16,
+        'Mélange conifères': 26,
+        'Conifères en îlots': 27,
+        'Mélange de conifères prépondérants et feuillus': 28,
+        'Mélange de feuillus prépondérants et conifères': 29
+    }
+    
+    # Filtrer les classes et ajouter les attributs 'Nom' et 'Code'
+    gdf_filtered = gdf[gdf['TFV'].isin(valid_classes.values())].copy()
+    gdf_filtered['Nom'] = gdf_filtered['TFV'].map({v: k for k, v in valid_classes.items()})
+    gdf_filtered['Code'] = gdf_filtered['TFV']
+    
+    print(f"✅ {len(gdf_filtered)} polygones sélectionnés.")
+    return gdf_filtered
+
+def save_vector_file(gdf, output_path):
+    """
+    Sauvegarde un GeoDataFrame en tant que fichier vectoriel.
+    """
+    gdf.to_file(output_path, driver='ESRI Shapefile')
+    print(f"💾 Fichier sauvegardé : {output_path}")
+
