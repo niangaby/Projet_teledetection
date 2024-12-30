@@ -1,5 +1,8 @@
 import os
 from osgeo import gdal, ogr, osr
+import matplotlib.pyplot as plt
+import plotly.express as px
+import pandas as pd
 
 def validate_and_create_directory(path):
     """
@@ -119,4 +122,90 @@ def save_vector_file(gdf, output_path):
     """
     gdf.to_file(output_path, driver='ESRI Shapefile')
     print(f"💾 Fichier sauvegardé : {output_path}")
+
+ # une analyse des échantillons sélectionné
+
+
+def plot_bar_polygons_per_class(gdf, output_path, interactive=False):
+    """ Crée un diagramme en bâtons du nombre de polygones par classe. """
+    polygon_counts = gdf['Code_Pixel'].value_counts().reset_index()
+    polygon_counts.columns = ['Classe', 'Nombre de polygones']
+    
+    if interactive:
+        fig = px.bar(
+            polygon_counts, 
+            x='Classe', 
+            y='Nombre de polygones',
+            title='Nombre de polygones par classe',
+            labels={'Nombre de polygones': 'Nombre de polygones', 'Classe': 'Classe'},
+            template='plotly_dark'
+        )
+        fig.write_html(output_path)
+    else:
+        plt.figure(figsize=(12, 6))
+        plt.bar(polygon_counts['Classe'], polygon_counts['Nombre de polygones'], color='skyblue')
+        plt.title('Nombre de polygones par classe')
+        plt.xlabel('Classe')
+        plt.ylabel('Nombre de polygones')
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        plt.savefig(output_path)
+        plt.close()
+
+
+def plot_bar_pixels_per_class(gdf, output_path, interactive=False):
+    """ Crée un diagramme en bâtons du nombre de pixels par classe. """
+    pixel_counts = gdf.groupby('Code_Pixel')['NB_PIX'].sum().reset_index()
+    pixel_counts.columns = ['Classe', 'Nombre de pixels']
+    
+    if interactive:
+        fig = px.bar(
+            pixel_counts, 
+            x='Classe', 
+            y='Nombre de pixels',
+            title='Nombre de pixels par classe',
+            labels={'Nombre de pixels': 'Nombre de pixels', 'Classe': 'Classe'},
+            template='plotly_dark'
+        )
+        fig.write_html(output_path)
+    else:
+        plt.figure(figsize=(12, 6))
+        plt.bar(pixel_counts['Classe'], pixel_counts['Nombre de pixels'], color='lightcoral')
+        plt.title('Nombre de pixels par classe')
+        plt.xlabel('Classe')
+        plt.ylabel('Nombre de pixels')
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        plt.savefig(output_path)
+        plt.close()
+
+
+def plot_violin_pixels_per_polygon_by_class(gdf, output_path, interactive=False):
+    """ Crée un Violin Plot pour la distribution du nombre de pixels par polygone, par classe. """
+    if interactive:
+        fig = px.violin(
+            gdf, 
+            x='Code_Pixel', 
+            y='NB_PIX', 
+            box=True, 
+            points='all',
+            title='Distribution du nombre de pixels par polygone, par classe',
+            labels={'NB_PIX': 'Nombre de pixels', 'Code_Pixel': 'Classe'},
+            template='plotly_dark'
+        )
+        fig.write_html(output_path)
+    else:
+        plt.figure(figsize=(14, 8))
+        classes = gdf['Code_Pixel'].unique()
+        for cls in classes:
+            subset = gdf[gdf['Code_Pixel'] == cls]
+            plt.violinplot(subset['NB_PIX'], positions=[list(classes).index(cls)], showmeans=True)
+        
+        plt.title('Distribution du nombre de pixels par polygone, par classe')
+        plt.xlabel('Classe')
+        plt.ylabel('Nombre de pixels par polygone')
+        plt.xticks(ticks=range(len(classes)), labels=classes, rotation=45)
+        plt.tight_layout()
+        plt.savefig(output_path)
+        plt.close()
 
