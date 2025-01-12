@@ -19,6 +19,9 @@ def build_forest_mask(formation_shp, emprise_shp, output_mask):
     formation_ds = open_shapefile(formation_shp)
     formation_layer = formation_ds.GetLayer()
     formation_layer = filter_forest_layer(formation_layer)
+    # Vérification que la couche filtrée contient des entités
+    if formation_layer.GetFeatureCount() == 0:
+        raise ValueError("Aucune donnée forestière n'a été trouvée après filtrage.")
     
     # ✅ Ouvrir le shapefile emprise_etude
     emprise_ds = open_shapefile(emprise_shp)
@@ -34,7 +37,7 @@ def build_forest_mask(formation_shp, emprise_shp, output_mask):
     # ✅ Rasteriser la couche filtrée
     rasterize_layer(out_raster, formation_layer)
     
-    print(f"✅ Masque forêt créé : {output_mask}")
+    print(f"✅ Masque forêt créé avec succès : {output_mask}")
 
 # ✅ Chemins des fichiers
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))

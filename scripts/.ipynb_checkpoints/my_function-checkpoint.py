@@ -3,7 +3,9 @@ from osgeo import gdal, ogr, osr
 import matplotlib.pyplot as plt
 import plotly.express as px
 import pandas as pd
-
+import rasterio
+import numpy as np
+#Validation et création des dossiers de sortie
 def validate_and_create_directory(path):
     """
     Valide et crée un répertoire s'il n'existe pas.
@@ -11,6 +13,27 @@ def validate_and_create_directory(path):
     if not os.path.exists(path):
         os.makedirs(path)
         print(f"📂 Dossier créé : {path}")
+    else:  # 
+        print(f"✅ Dossier déjà existant : {path}")  
+
+        
+#Vérification des systèmes de coordonnées
+def check_and_reproject_layer(layer, target_srs):
+    """
+    Vérifie si la couche est dans le même système de coordonnées que celui cible.
+    Si ce n'est pas le cas, reprojette la couche.
+    """
+    source_srs = layer.GetSpatialRef()
+    if not source_srs.IsSame(target_srs):
+        print("🔄 Reprojection en cours...")
+        coord_trans = osr.CoordinateTransformation(source_srs, target_srs)
+        for feature in layer:
+            geom = feature.GetGeometryRef()
+            geom.Transform(coord_trans)
+        print("✅ Reprojection terminée.")
+    else:
+        print("✅ Les systèmes de coordonnées correspondent.")
+
 
 def open_shapefile(shapefile_path):
     """
@@ -20,7 +43,8 @@ def open_shapefile(shapefile_path):
     if ds is None:
         raise FileNotFoundError(f"Erreur : Impossible d'ouvrir le fichier {shapefile_path}.")
     return ds
-
+    
+#Filtrage des formations
 def filter_forest_layer(layer):
     """
     Applique un filtre pour exclure certaines classes non forestières.
@@ -32,6 +56,9 @@ def filter_forest_layer(layer):
     layer.SetAttributeFilter(
         "TFV NOT IN ('" + "', '".join(excluded_classes) + "')"
     )
+    return layer
+    # Vérification du nombre d'entités après filtrage
+    print(f"✅ Nombre de polygones après filtrage : {layer.GetFeatureCount()}")
     return layer
 
 def create_raster_from_shapefile(output_path, emprise_layer, spatial_ref, resolution=10):
@@ -209,3 +236,95 @@ def plot_violin_pixels_per_polygon_by_class(gdf, output_path, interactive=False)
         plt.savefig(output_path)
         plt.close()
 
+#calcul du NDVI et l'application du masque.
+
+def calculer_ndvi(image_red, image_nir):
+    # Calcul du NDVI : (NIR - Rouge) / (NIR + Rouge)
+    return (image_nir - image_red) / (image_nir + image_red)
+
+def appliquer_mask(input_image, mask_image, output_image, nodata_value=-9999):
+    with rasterio.open(input_image) as src:
+        image_data = src.read(1)
+        nodata_value = src.nodata
+    
+    with rasterio.open(mask_image) as mask:
+        mask_data = mask.read(1)
+    
+    # Appliquer le masque (valeurs 0 pour non forêt)
+    image_data[mask_data == 0] = nodata_value
+
+    # Sauvegarder l'image masquée
+    with rasterio.open(output_image, 'w', driver='GTiff', count=1, dtype=image_data.dtype,
+                       width=image_data.shape[1], height=image_data.shape[0], crs=src.crs, transform=src.transform,
+                       nodata=nodata_value) as dst:
+        dst.write(image_data, 1)
+    
+    print(f"L'image masquée a été sauvegardée sous {output_image}")
+
+def pre_traiter_ndvi(input_folder, output_path, shapefile_path, mask_path, resolution=10):
+    images = [f for f in os.listdir(input_folder) if f.endswith(".tif")]
+    
+    ndvi_stack = []
+    
+    for image in images:
+        image_path = os.path.join(input_folder, image)
+        
+        with rasterio.open(image_path) as src:
+            # Lire les bandes nécessaires (bandes 4 et 8 pour calculer le NDVI)
+            band_red = src.read(4)
+            band_nir = src.read(8)
+
+            # Calculer le NDVI
+            ndvi = calculer_ndvi(band_red, band_nir)
+
+            # Appliquer le masque de forêt
+            output_ndvi_path = os.path.join(output_path, f"NDVI_{image}")
+            appliquer_mask(ndvi, mask_path, output_ndvi_path)
+            ndvi_stack.append(output_ndvi_path)
+    
+    print("Série temporelle NDVI produite et masquée.")
+
+# Exemple d'appel pour calculer NDVI
+input_folder = "input_images"  # dossier contenant les images
+output_path = "results/data/img_pretaitees"
+shapefile_path = "emprise_etude.shp"
+mask_path = "masque_foret.tif"
+pre_traiter_ndvi(input_folder, output_path, shapefile_path, mask_path)
+
+
+#pour pretraitemnt
+#Découper l'image selon l'emprise (clipping)
+def clip_image(input_image, shapefile_path, output_image):
+    """
+    Découpe une image raster en fonction d'un shapefile.
+    """
+    clip_image_to_extent(input_image, shapefile_path, output_image)
+    print(f"✅ Image découpée et sauvegardée sous : {output_image}")
+#Reprojection des images 
+
+def reproject_image(input_image, output_image, target_crs):
+    """
+    Reprojette une image raster dans un système de coordonnées cible.
+    """
+    with rasterio.open(input_image) as src:
+        transform, width, height = calculate_default_transform(src.crs, target_crs, src.width, src.height, *src.bounds)
+        kwargs = src.meta.copy()
+        kwargs.update({
+            'crs': target_crs,
+            'transform': transform,
+            'width': width,
+            'height': height
+        })
+        
+        with rasterio.open(output_image, 'w', **kwargs) as dst:
+            for i in range(1, src.count + 1):
+                reproject(
+                    source=rasterio.band(src, i),
+                    destination=rasterio.band(dst, i),
+                    src_transform=src.transform,
+                    src_crs=src.crs,
+                    dst_transform=transform,
+                    dst_crs=target_crs,
+                    resampling=Resampling.nearest
+                )
+        print(f"✅ Image projetée et sauvegardée sous : {output_image}")
