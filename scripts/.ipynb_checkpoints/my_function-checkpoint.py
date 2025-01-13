@@ -103,6 +103,184 @@ def rasterize_layer(raster, layer):
     raster = None
     print("✅ Rasterisation terminée.")
 
+#calcul du NDVI et l'application du masque.
+
+def calculer_ndvi(image_red, image_nir):
+    # Calcul du NDVI : (NIR - Rouge) / (NIR + Rouge)
+    return (image_nir - image_red) / (image_nir + image_red)
+
+def appliquer_mask(input_image, mask_image, output_image, nodata_value=-9999):
+    with rasterio.open(input_image) as src:
+        image_data = src.read(1)
+        nodata_value = src.nodata
+    
+    with rasterio.open(mask_image) as mask:
+        mask_data = mask.read(1)
+    
+    # Appliquer le masque (valeurs 0 pour non forêt)
+    image_data[mask_data == 0] = nodata_value
+
+    # Sauvegarder l'image masquée
+    with rasterio.open(output_image, 'w', driver='GTiff', count=1, dtype=image_data.dtype,
+                       width=image_data.shape[1], height=image_data.shape[0], crs=src.crs, transform=src.transform,
+                       nodata=nodata_value) as dst:
+        dst.write(image_data, 1)
+    
+    print(f"L'image masquée a été sauvegardée sous {output_image}")
+
+def pre_traiter_ndvi(input_folder, output_path, shapefile_path, mask_path, resolution=10):
+    images = [f for f in os.listdir(input_folder) if f.endswith(".tif")]
+    
+    ndvi_stack = []
+    
+    for image in images:
+        image_path = os.path.join(input_folder, image)
+        
+        with rasterio.open(image_path) as src:
+            # Lire les bandes nécessaires (bandes 4 et 8 pour calculer le NDVI)
+            band_red = src.read(4)
+            band_nir = src.read(8)
+
+            # Calculer le NDVI
+            ndvi = calculer_ndvi(band_red, band_nir)
+
+            # Appliquer le masque de forêt
+            output_ndvi_path = os.path.join(output_path, f"NDVI_{image}")
+            appliquer_mask(ndvi, mask_path, output_ndvi_path)
+            ndvi_stack.append(output_ndvi_path)
+    
+    print("Série temporelle NDVI produite et masquée.")
+
+# Exemple d'appel pour calculer NDVI
+input_folder = "input_images"  # dossier contenant les images
+output_path = "results/data/img_pretaitees"
+shapefile_path = "emprise_etude.shp"
+mask_path = "masque_foret.tif"
+pre_traiter_ndvi(input_folder, output_path, shapefile_path, mask_path)
+
+
+#pour pretraitemnt
+#Découper l'image selon l'emprise (clipping)
+def clip_image(input_image, shapefile_path, output_image):
+    """
+    Découpe une image raster en fonction d'un shapefile.
+    """
+    clip_image_to_extent(input_image, shapefile_path, output_image)
+    print(f"✅ Image découpée et sauvegardée sous : {output_image}")
+#Reprojection des images 
+
+def reproject_image(input_image, output_image, target_crs):
+    """
+    Reprojette une image raster dans un système de coordonnées cible.
+    """
+    with rasterio.open(input_image) as src:
+        transform, width, height = calculate_default_transform(src.crs, target_crs, src.width, src.height, *src.bounds)
+        kwargs = src.meta.copy()
+        kwargs.update({
+            'crs': target_crs,
+            'transform': transform,
+            'width': width,
+            'height': height
+        })
+        
+        with rasterio.open(output_image, 'w', **kwargs) as dst:
+            for i in range(1, src.count + 1):
+                reproject(
+                    source=rasterio.band(src, i),
+                    destination=rasterio.band(dst, i),
+                    src_transform=src.transform,
+                    src_crs=src.crs,
+                    dst_transform=transform,
+                    dst_crs=target_crs,
+                    resampling=Resampling.nearest
+                )
+        print(f"✅ Image projetée et sauvegardée sous : {output_image}")
+
+#2
+import rasterio
+import geopandas as gpd
+from rasterio.mask import mask
+from rasterio.warp import calculate_default_transform, reproject, Resampling
+
+
+def clip_image(image_path, shapefile_path, output_path):
+    """
+    Découpe une image raster selon l'emprise définie par un shapefile.
+    """
+    with rasterio.open(image_path) as src:
+        shapefile = gpd.read_file(shapefile_path)
+        shapefile = shapefile.to_crs(src.crs)  # Aligner le shapefile au système de coordonnées de l'image
+        shapes = [feature.geometry for _, feature in shapefile.iterrows()]
+        out_image, out_transform = mask(src, shapes, crop=True)
+        out_meta = src.meta.copy()
+        out_meta.update({"driver": "GTiff",
+                         "height": out_image.shape[1],
+                         "width": out_image.shape[2],
+                         "transform": out_transform})
+
+        with rasterio.open(output_path, "w", **out_meta) as dest:
+            dest.write(out_image)
+
+
+def resample_image(input_image, output_image, target_resolution=10):
+    """
+    Rééchantillonne une image raster à une résolution cible.
+    """
+    with rasterio.open(input_image) as src:
+        transform, width, height = calculate_default_transform(
+            src.crs, src.crs, src.width, src.height, *src.bounds, resolution=target_resolution)
+        profile = src.profile
+        profile.update(transform=transform, width=width, height=height, dtype=rasterio.float32)
+
+        with rasterio.open(output_image, 'w', **profile) as dst:
+            for i in range(1, src.count + 1):
+                reproject(
+                    source=rasterio.band(src, i),
+                    destination=rasterio.band(dst, i),
+                    src_transform=src.transform,
+                    src_crs=src.crs,
+                    dst_transform=transform,
+                    dst_crs=src.crs,
+                    resampling=Resampling.nearest)
+
+
+def merge_bands_to_multispectral(input_bands, output_image):
+    """
+    Fusionne plusieurs bandes raster en une seule image multispectrale.
+    """
+    with rasterio.open(input_bands[0]) as src:
+        profile = src.profile
+        profile.update(count=len(input_bands))
+
+        with rasterio.open(output_image, 'w', **profile) as dst:
+            for i, band_path in enumerate(input_bands, start=1):
+                with rasterio.open(band_path) as band:
+                    dst.write(band.read(1), i)
+
+
+def apply_mask(input_image, mask_image, output_image):
+    """
+    Applique un masque (par exemple de forêt) à une image raster.
+    """
+    with rasterio.open(input_image) as src:
+        image_data = src.read()
+        nodata_value = src.nodata
+
+    with rasterio.open(mask_image) as mask_src:
+        mask_data = mask_src.read(1)
+
+    # Appliquer le masque (les zones non désirées deviennent NoData)
+    image_data[:, mask_data == 0] = nodata_value
+
+    with rasterio.open(output_image, 'w', driver='GTiff', count=image_data.shape[0], dtype=image_data.dtype,
+                       width=image_data.shape[2], height=image_data.shape[1], crs=src.crs, transform=src.transform,
+                       nodata=nodata_value) as dst:
+        dst.write(image_data)
+
+
+
+
+
 # sample curation
 
 import geopandas as gpd
@@ -235,96 +413,3 @@ def plot_violin_pixels_per_polygon_by_class(gdf, output_path, interactive=False)
         plt.tight_layout()
         plt.savefig(output_path)
         plt.close()
-
-#calcul du NDVI et l'application du masque.
-
-def calculer_ndvi(image_red, image_nir):
-    # Calcul du NDVI : (NIR - Rouge) / (NIR + Rouge)
-    return (image_nir - image_red) / (image_nir + image_red)
-
-def appliquer_mask(input_image, mask_image, output_image, nodata_value=-9999):
-    with rasterio.open(input_image) as src:
-        image_data = src.read(1)
-        nodata_value = src.nodata
-    
-    with rasterio.open(mask_image) as mask:
-        mask_data = mask.read(1)
-    
-    # Appliquer le masque (valeurs 0 pour non forêt)
-    image_data[mask_data == 0] = nodata_value
-
-    # Sauvegarder l'image masquée
-    with rasterio.open(output_image, 'w', driver='GTiff', count=1, dtype=image_data.dtype,
-                       width=image_data.shape[1], height=image_data.shape[0], crs=src.crs, transform=src.transform,
-                       nodata=nodata_value) as dst:
-        dst.write(image_data, 1)
-    
-    print(f"L'image masquée a été sauvegardée sous {output_image}")
-
-def pre_traiter_ndvi(input_folder, output_path, shapefile_path, mask_path, resolution=10):
-    images = [f for f in os.listdir(input_folder) if f.endswith(".tif")]
-    
-    ndvi_stack = []
-    
-    for image in images:
-        image_path = os.path.join(input_folder, image)
-        
-        with rasterio.open(image_path) as src:
-            # Lire les bandes nécessaires (bandes 4 et 8 pour calculer le NDVI)
-            band_red = src.read(4)
-            band_nir = src.read(8)
-
-            # Calculer le NDVI
-            ndvi = calculer_ndvi(band_red, band_nir)
-
-            # Appliquer le masque de forêt
-            output_ndvi_path = os.path.join(output_path, f"NDVI_{image}")
-            appliquer_mask(ndvi, mask_path, output_ndvi_path)
-            ndvi_stack.append(output_ndvi_path)
-    
-    print("Série temporelle NDVI produite et masquée.")
-
-# Exemple d'appel pour calculer NDVI
-input_folder = "input_images"  # dossier contenant les images
-output_path = "results/data/img_pretaitees"
-shapefile_path = "emprise_etude.shp"
-mask_path = "masque_foret.tif"
-pre_traiter_ndvi(input_folder, output_path, shapefile_path, mask_path)
-
-
-#pour pretraitemnt
-#Découper l'image selon l'emprise (clipping)
-def clip_image(input_image, shapefile_path, output_image):
-    """
-    Découpe une image raster en fonction d'un shapefile.
-    """
-    clip_image_to_extent(input_image, shapefile_path, output_image)
-    print(f"✅ Image découpée et sauvegardée sous : {output_image}")
-#Reprojection des images 
-
-def reproject_image(input_image, output_image, target_crs):
-    """
-    Reprojette une image raster dans un système de coordonnées cible.
-    """
-    with rasterio.open(input_image) as src:
-        transform, width, height = calculate_default_transform(src.crs, target_crs, src.width, src.height, *src.bounds)
-        kwargs = src.meta.copy()
-        kwargs.update({
-            'crs': target_crs,
-            'transform': transform,
-            'width': width,
-            'height': height
-        })
-        
-        with rasterio.open(output_image, 'w', **kwargs) as dst:
-            for i in range(1, src.count + 1):
-                reproject(
-                    source=rasterio.band(src, i),
-                    destination=rasterio.band(dst, i),
-                    src_transform=src.transform,
-                    src_crs=src.crs,
-                    dst_transform=transform,
-                    dst_crs=target_crs,
-                    resampling=Resampling.nearest
-                )
-        print(f"✅ Image projetée et sauvegardée sous : {output_image}")
