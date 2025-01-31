@@ -869,3 +869,48 @@ def save_results(sample_data, out_shapefile):
     
     # Sauvegarder les résultats dans le shapefile
     sample_data.to_file(out_shapefile)
+
+
+
+
+#sample_analysis_temp_signature
+import numpy as np
+from osgeo import gdal, ogr
+
+# Fonction pour charger un raster et obtenir les valeurs
+def load_raster_sign(file_path):
+    dataset = gdal.Open(file_path)
+    if not dataset:
+        raise FileNotFoundError(f"Le fichier {file_path} est introuvable.")
+    band = dataset.GetRasterBand(1)
+    data = band.ReadAsArray()
+    nodata_value = band.GetNoDataValue()
+    return data, nodata_value
+
+# Fonction pour rasteriser un shapefile selon une classe spécifiée
+def rasterize_shapefile_sign(shapefile_path, reference_raster_path, field_name):
+    # Charger le shapefile
+    shapefile = ogr.Open(shapefile_path)
+    layer = shapefile.GetLayer()
+    
+    # Charger le raster de référence (NDVI)
+    reference_ds = gdal.Open(reference_raster_path)
+    transform = reference_ds.GetGeoTransform()
+    projection = reference_ds.GetProjection()
+    cols = reference_ds.RasterXSize
+    rows = reference_ds.RasterYSize
+    
+    # Créer un raster vide pour la classe
+    driver = gdal.GetDriverByName('GTiff')
+    rasterized_ds = driver.Create('/tmp/rasterized.tif', cols, rows, 1, gdal.GDT_Int32)
+    rasterized_ds.SetGeoTransform(transform)
+    rasterized_ds.SetProjection(projection)
+    
+    # Rasteriser le shapefile
+    gdal.RasterizeLayer(rasterized_ds, [1], layer, options=[f"ATTRIBUTE={field_name}"])
+    
+    # Lire le raster rasterisé
+    rasterized_data = rasterized_ds.GetRasterBand(1).ReadAsArray()
+    
+    return rasterized_data
+

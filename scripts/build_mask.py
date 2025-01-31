@@ -14,7 +14,7 @@ def build_forest_mask(formation_shp, emprise_shp, output_mask):
     # ✅ Valider et créer le dossier de sortie
     output_dir = os.path.dirname(output_mask)
     validate_and_create_directory(output_dir)
-    
+
     # ✅ Ouvrir le shapefile Formation_vegetale et filtrer
     formation_ds = open_shapefile(formation_shp)
     formation_layer = formation_ds.GetLayer()
@@ -22,22 +22,22 @@ def build_forest_mask(formation_shp, emprise_shp, output_mask):
     # Vérification que la couche filtrée contient des entités
     if formation_layer.GetFeatureCount() == 0:
         raise ValueError("Aucune donnée forestière n'a été trouvée après filtrage.")
-    
+
     # ✅ Ouvrir le shapefile emprise_etude
     emprise_ds = open_shapefile(emprise_shp)
     emprise_layer = emprise_ds.GetLayer()
     spatial_ref = emprise_layer.GetSpatialRef()
-    
+
     if spatial_ref is None:
         raise ValueError("Erreur : Impossible d'obtenir la projection depuis emprise_etude.shp.")
-    
+
     # ✅ Créer un raster vide
     out_raster = create_raster_from_shapefile(output_mask, emprise_layer, spatial_ref)
-    
+
     # ✅ Rasteriser la couche filtrée
     rasterize_layer(out_raster, formation_layer)
-    
-    print(f"✅ Masque forêt créé avec succès : {output_mask}")
+
+    print("✅ Masque forêt créé avec succès : {}".format(output_mask))
 
 # ✅ Chemins des fichiers
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))

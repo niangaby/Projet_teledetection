@@ -1,3 +1,4 @@
+import os
 import geopandas as gpd
 from my_function import filter_classes, clip_to_extent, save_vector_file
 
@@ -155,7 +156,9 @@ print("\n📊 Valeurs uniques pour Code_Pixel :", gdf_clipped['Code_Pixel'].uniq
 print("📊 Valeurs uniques pour Nom_Pixel :", gdf_clipped['Nom_Pixel'].unique())
 print("📊 Valeurs uniques pour Code_Objet :", gdf_clipped['Code_Objet'].unique())
 print("📊 Valeurs uniques pour Nom_Objet :", gdf_clipped['Nom_Objet'].unique())
-
+# Créer les dossiers si nécessaire
+output_dir = os.path.dirname(output_shapefile)
+os.makedirs(output_dir, exist_ok=True)
 output_path = '/home/onyxia/work/results/data/sample/Sample_BD_foret_T31TCJ.shp'
 gdf_clipped.to_file(output_path, driver='ESRI Shapefile')
 
